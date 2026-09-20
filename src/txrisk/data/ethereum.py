@@ -24,12 +24,14 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
 
+import pandas as pd
 import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.dataset as ds
 import pyarrow.fs as pafs
 import pyarrow.parquet as pq
 
+from txrisk.data.addresses import canonicalise_addresses
 from txrisk.paths import RAW_DIR
 
 BUCKET = "aws-public-blockchain/v1.0/eth"
@@ -293,6 +295,24 @@ def open_table(table: str, root: Path = RAW_DIR / "ethereum") -> ds.Dataset:
             f"{path} not found. Run: python -m txrisk.data.ethereum --start <date> --days <n>"
         )
     return ds.dataset(path, format="parquet", partitioning="hive")
+
+
+def extracted_days(root: Path = RAW_DIR / "ethereum", table: str = "transactions") -> list[str]:
+    days = open_table(table, root).to_table(columns=["date"]).column("date").to_pylist()
+    return sorted({str(day) for day in days})
+
+
+def load_day(
+    table: str, day: str, columns: list[str], root: Path = RAW_DIR / "ethereum"
+) -> pd.DataFrame:
+    """One day of one table, with every address in the same format.
+
+    Canonicalising belongs here rather than in each caller: the raw files keep the source's
+    own spellings, and nothing downstream has to remember that one table pads its
+    addresses to 32 bytes while the others do not.
+    """
+    rows = open_table(table, root).to_table(columns=columns, filter=pc.field("date") == day)
+    return canonicalise_addresses(rows.to_pandas())
 
 
 def main(argv: list[str] | None = None) -> None:

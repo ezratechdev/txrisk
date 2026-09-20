@@ -101,6 +101,25 @@ def test_open_table_reads_every_extracted_day_as_one_dataset(tmp_path):
     assert sorted(set(table.column("date").to_pylist())) == ["2026-09-01", "2026-09-02"]
 
 
+def test_load_day_canonicalises_addresses_so_callers_cannot_forget(tmp_path):
+    """The padded/plain mismatch has to be impossible to reintroduce downstream."""
+    partition = tmp_path / "token_transfers" / f"date={DAY:%Y-%m-%d}"
+    partition.mkdir(parents=True)
+    padded = "0x" + "0" * 24 + "a" * 40
+    pq.write_table(pa.table({"from_address": [padded], "value": [1.0]}), partition / "part.parquet")
+
+    frame = ethereum.load_day("token_transfers", "2026-09-01", ["from_address", "value"], tmp_path)
+    assert frame["from_address"].iat[0] == "0x" + "a" * 40
+
+
+def test_extracted_days_lists_what_is_on_disk(tmp_path):
+    for day in ["2026-09-01", "2026-09-02"]:
+        partition = tmp_path / "transactions" / f"date={day}"
+        partition.mkdir(parents=True)
+        pq.write_table(pa.table({"hash": ["a"]}), partition / "part.parquet")
+    assert ethereum.extracted_days(tmp_path) == ["2026-09-01", "2026-09-02"]
+
+
 def test_open_table_says_what_to_run_when_nothing_is_extracted(tmp_path):
     with pytest.raises(FileNotFoundError, match="txrisk.data.ethereum"):
         ethereum.open_table("transactions", tmp_path)

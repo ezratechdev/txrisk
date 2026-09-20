@@ -13,34 +13,15 @@ import argparse
 from pathlib import Path
 
 import pandas as pd
-import pyarrow.compute as pc
 
-from txrisk.data.addresses import canonicalise_addresses
-from txrisk.data.ethereum import open_table
+from txrisk.data.ethereum import extracted_days, load_day
 from txrisk.data.labels import load_labels
-from txrisk.paths import PROCESSED_DIR
+from txrisk.paths import PROCESSED_DIR, RAW_DIR
 from txrisk.report import markdown_table, save_report
 from txrisk.rules import empty_hits
 from txrisk.rules.approvals import find_approval_phishing
 from txrisk.rules.exposure import find_known_bad_exposure
 from txrisk.rules.poisoning import find_address_poisoning
-
-
-def extracted_days(root: Path | None = None) -> list[str]:
-    table = open_table("transactions") if root is None else open_table("transactions", root)
-    days = table.to_table(columns=["date"]).column("date").to_pylist()
-    return sorted({str(day) for day in days})
-
-
-def load_day(table: str, day: str, columns: list[str], root: Path | None = None) -> pd.DataFrame:
-    """One day of one table, with every address in the same format.
-
-    Raw files stay exactly as the source published them; canonicalising on read keeps one
-    definition of "the same address" in one place, instead of in each rule.
-    """
-    dataset = open_table(table) if root is None else open_table(table, root)
-    filtered = dataset.to_table(columns=columns, filter=pc.field("date") == day)
-    return canonicalise_addresses(filtered.to_pandas())
 
 
 def known_bad_addresses() -> dict[str, str]:
@@ -57,7 +38,9 @@ def known_bad_addresses() -> dict[str, str]:
     }
 
 
-def scan_day(day: str, known_bad: dict[str, str], root: Path | None = None) -> pd.DataFrame:
+def scan_day(
+    day: str, known_bad: dict[str, str], root: Path = RAW_DIR / "ethereum"
+) -> pd.DataFrame:
     transfers = load_day(
         "token_transfers", day, ["from_address", "to_address", "value", "transaction_hash"], root
     )
