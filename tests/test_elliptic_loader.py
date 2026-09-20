@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from blockchain_analysis.data.elliptic import AGG_FEATURES, LOCAL_FEATURES, load_elliptic
+from txrisk.data.elliptic import AGG_FEATURES, LOCAL_FEATURES, load_elliptic
 
 N_FEATURES = len(LOCAL_FEATURES) + len(AGG_FEATURES)
 

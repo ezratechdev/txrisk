@@ -1,6 +1,6 @@
 import numpy as np
 
-from blockchain_analysis.evaluation.splits import random_split, temporal_split
+from txrisk.evaluation.splits import random_split, temporal_split
 
 
 def test_temporal_split_never_trains_on_the_future():

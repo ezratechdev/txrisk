@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from blockchain_analysis.evaluation.metrics import (
+from txrisk.evaluation.metrics import (
     evaluate,
     expected_calibration_error,
     f1_by_group,

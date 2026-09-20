@@ -1,4 +1,4 @@
-# blockchain_analysis
+# txrisk
 
 Open-source models that estimate how likely a blockchain transaction is to be fraudulent and,
 where the on-chain evidence allows, what kind of fraud it is.
@@ -11,16 +11,18 @@ to score real transactions yet.
 Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 
 ```sh
-uv sync                                                          # create .venv and install
-uv run python -m blockchain_analysis.data.download elliptic      # about 150 MB download
-uv run python -m blockchain_analysis.experiments.elliptic_baseline
+uv sync                                                      # create .venv and install
+uv run python -m txrisk.data.download elliptic bitcoinheist  # about 270 MB download
+uv run python -m txrisk.experiments.elliptic_baseline        # fraud or not (about 1 minute)
+uv run python -m txrisk.experiments.bitcoinheist_typology    # which fraud (about 10 minutes)
 uv run pytest
 ```
 
-Results are written to [reports/elliptic_baseline.md](reports/elliptic_baseline.md).
+Results are written to [reports/elliptic_baseline.md](reports/elliptic_baseline.md) and
+[reports/bitcoinheist_typology.md](reports/bitcoinheist_typology.md).
 
 Datasets are saved under `data/`, which git ignores. To keep them on another drive, set
-`BA_DATA_DIR` to a folder there.
+`TXRISK_DATA_DIR` to a folder there.
 
 ## Datasets
 
@@ -40,6 +42,12 @@ source and checks it against a pinned SHA-256 checksum. Check each source's term
   calibration (Brier score, ECE). Never accuracy.
 - **Beat the baselines.** A new model has to outperform the simple models in
   `models/baselines.py` on the temporal split.
+- **Split by actor as well as by time.** Test rows for an address seen in training are
+  dropped, so a model is scored on new actors rather than on remembering old ones.
+- **Learn the decision threshold** on held-out training data. At a 0.5% fraud rate an
+  assumed 0.5 cut-off flags nothing and makes a working model look broken.
+- **Let the model answer "unknown".** New fraud types appear that were never in the
+  training data; naming a trained type for them is worse than admitting ignorance.
 
 ## Responsible use
 

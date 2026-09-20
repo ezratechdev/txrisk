@@ -1,0 +1,219 @@
+{
+  "detection": [
+    {
+      "model": "logistic_regression",
+      "threshold": 0.021465638652443886,
+      "precision": 0.003415231307846455,
+      "recall": 0.12792056074766356,
+      "f1": 0.006652844546718006,
+      "pr_auc": 0.004379342733999802,
+      "roc_auc": 0.4722734509280179,
+      "recall_at_1pct_fpr": 0.008177570093457943,
+      "brier": 0.005377078894525766,
+      "ece": 0.016927472398423397,
+      "base_rate": 0.004949886733754209,
+      "pr_auc_lift": 0.8847359484281206,
+      "n_test": 691733,
+      "fit_seconds": 4.824554899940267
+    },
+    {
+      "model": "random_forest",
+      "threshold": 0.24249562090336393,
+      "precision": 0.06465234801601748,
+      "recall": 0.25934579439252337,
+      "f1": 0.10350253511276881,
+      "pr_auc": 0.05561314883662994,
+      "roc_auc": 0.755431428783079,
+      "recall_at_1pct_fpr": 0.19363317757009346,
+      "brier": 0.009052685162021129,
+      "ece": 0.017331208466477573,
+      "base_rate": 0.004949886733754209,
+      "pr_auc_lift": 11.23523664842539,
+      "n_test": 691733,
+      "fit_seconds": 160.14241059985943
+    },
+    {
+      "model": "lightgbm",
+      "threshold": 0.08762438434990838,
+      "precision": 0.04935796458064824,
+      "recall": 0.3019859813084112,
+      "f1": 0.08484798752718171,
+      "pr_auc": 0.0307617929450503,
+      "roc_auc": 0.8022954232544004,
+      "recall_at_1pct_fpr": 0.08849299065420561,
+      "brier": 0.006037810512709539,
+      "ece": 0.01577613673207991,
+      "base_rate": 0.004949886733754209,
+      "pr_auc_lift": 6.214645829222687,
+      "n_test": 691733,
+      "fit_seconds": 51.898917299928144
+    }
+  ],
+  "detection_random_split": [
+    {
+      "model": "logistic_regression",
+      "threshold": 0.015690358355641365,
+      "precision": 0.019819314898036837,
+      "recall": 0.7890481064483111,
+      "f1": 0.03866738226486831,
+      "pr_auc": 0.018321133450157324,
+      "roc_auc": 0.6130977056897544,
+      "recall_at_1pct_fpr": 0.020777891504605937,
+      "brier": 0.01390400156378746,
+      "ece": 8.425780294741906e-05,
+      "base_rate": 0.014123946667283475,
+      "pr_auc_lift": 1.2971681274183906,
+      "n_test": 691733,
+      "fit_seconds": 4.412467099959031
+    },
+    {
+      "model": "random_forest",
+      "threshold": 0.2630711682538308,
+      "precision": 0.23823899371069182,
+      "recall": 0.1938587512794268,
+      "f1": 0.21376975169300225,
+      "pr_auc": 0.13574398424897544,
+      "roc_auc": 0.7479141136120402,
+      "recall_at_1pct_fpr": 0.20460593654042988,
+      "brier": 0.013881342081824835,
+      "ece": 0.009004050106660142,
+      "base_rate": 0.014123946667283475,
+      "pr_auc_lift": 9.610910282138846,
+      "n_test": 691733,
+      "fit_seconds": 164.1422220999375
+    },
+    {
+      "model": "lightgbm",
+      "threshold": 0.09348264215244459,
+      "precision": 0.1843720491029273,
+      "recall": 0.2398157625383828,
+      "f1": 0.20847050449328233,
+      "pr_auc": 0.12743867430355732,
+      "roc_auc": 0.8393440492741219,
+      "recall_at_1pct_fpr": 0.19416581371545547,
+      "brier": 0.013046040282445173,
+      "ece": 0.0006569217151676252,
+      "base_rate": 0.014123946667283475,
+      "pr_auc_lift": 9.022879886593921,
+      "n_test": 691733,
+      "fit_seconds": 52.15331070008688
+    }
+  ],
+  "typology": [
+    {
+      "model": "logistic_regression",
+      "confidence_cutoff": 0.29726654291152954,
+      "known_accuracy": 0.5141495382782246,
+      "known_macro_f1": 0.23164187512246098,
+      "known_answered": 0.8406315162347334,
+      "unseen_rejected": 0.04477611940298507,
+      "n_known": 3357,
+      "n_unseen": 67,
+      "n_classes_scored": 4,
+      "fit_seconds": 1.782746999990195
+    },
+    {
+      "model": "random_forest",
+      "confidence_cutoff": 0.5,
+      "known_accuracy": 0.6187071790288948,
+      "known_macro_f1": 0.29903498356731445,
+      "known_answered": 0.9005064045278522,
+      "unseen_rejected": 0.31343283582089554,
+      "n_known": 3357,
+      "n_unseen": 67,
+      "n_classes_scored": 4,
+      "fit_seconds": 1.458822499960661
+    },
+    {
+      "model": "lightgbm",
+      "confidence_cutoff": 0.4793864391477748,
+      "known_accuracy": 0.632409889782544,
+      "known_macro_f1": 0.2725688699552242,
+      "known_answered": 0.9058683348227584,
+      "unseen_rejected": 0.1044776119402985,
+      "n_known": 3357,
+      "n_unseen": 67,
+      "n_classes_scored": 4,
+      "fit_seconds": 12.827233100077137
+    }
+  ],
+  "per_class": [
+    {
+      "class": "cerber",
+      "precision": 0.9951004409603136,
+      "recall": 0.6386792452830189,
+      "f1": 0.7780118751197088,
+      "support": 3180
+    },
+    {
+      "class": "dmalocker",
+      "precision": 0.8823529411764706,
+      "recall": 0.11627906976744186,
+      "f1": 0.2054794520547945,
+      "support": 129
+    },
+    {
+      "class": "globe",
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "support": 8
+    },
+    {
+      "class": "locky",
+      "precision": 0.12062256809338522,
+      "recall": 0.775,
+      "f1": 0.20875420875420875,
+      "support": 40
+    }
+  ],
+  "unseen": [
+    {
+      "unseen family": "cryptconsole",
+      "rows": 7,
+      "answered unknown": 0.42857142857142855,
+      "most common wrong answer": "cryptolocker"
+    },
+    {
+      "unseen family": "eda2",
+      "rows": 3,
+      "answered unknown": 0.0,
+      "most common wrong answer": "cryptolocker"
+    },
+    {
+      "unseen family": "flyper",
+      "rows": 1,
+      "answered unknown": 0.0,
+      "most common wrong answer": "cryptolocker"
+    },
+    {
+      "unseen family": "samsam",
+      "rows": 20,
+      "answered unknown": 0.15,
+      "most common wrong answer": "cryptolocker"
+    },
+    {
+      "unseen family": "wannacry",
+      "rows": 28,
+      "answered unknown": 0.39285714285714285,
+      "most common wrong answer": "cryptowall"
+    },
+    {
+      "unseen family": "xlocker",
+      "rows": 8,
+      "answered unknown": 0.5,
+      "most common wrong answer": "locky"
+    }
+  ],
+  "known_classes": [
+    "cerber",
+    "cryptolocker",
+    "cryptotorlocker2015",
+    "cryptowall",
+    "cryptxxx",
+    "dmalocker",
+    "globe",
+    "locky",
+    "noobcrypt"
+  ]
+}

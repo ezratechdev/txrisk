@@ -1,5 +1,6 @@
-# Datasets are downloaded by scripts, never committed.
-data/
+# Downloaded datasets, never committed. The leading slash matters: it confines the
+# rule to the top-level folder, so it can't swallow the src/.../data package.
+/data/
 
 .venv/
 __pycache__/
