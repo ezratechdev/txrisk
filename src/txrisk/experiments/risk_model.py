@@ -26,7 +26,12 @@ from sklearn.calibration import CalibratedClassifierCV
 from txrisk.data.ethereum import extracted_days
 from txrisk.data.labels import load_labels
 from txrisk.evaluation.metrics import evaluate
-from txrisk.evaluation.splits import Split, random_split, temporal_split
+from txrisk.evaluation.splits import (
+    Split,
+    drop_overlapping_groups,
+    random_split,
+    temporal_split,
+)
 from txrisk.features.address_day import build_address_features
 from txrisk.paths import PROCESSED_DIR
 from txrisk.report import markdown_table, save_report
@@ -65,12 +70,18 @@ def load_dataset(days: list[str]) -> pd.DataFrame:
 
 
 def make_split(data: pd.DataFrame, seed: int) -> Split:
-    """Split by day when there is more than one, so the test period is genuinely later."""
+    """Train on earlier days, test on the last one, and never on the same address twice.
+
+    Addresses active on both sides are dropped from the test set. Without that the model
+    is rewarded for recognising an address it has already seen rather than for
+    recognising the behaviour, which is the whole question.
+    """
     days = sorted(data["day"].unique())
-    if len(days) > 1:
-        order = {day: index for index, day in enumerate(days)}
-        return temporal_split(data["day"].map(order).to_numpy(), train_until=len(days) - 2)
-    return random_split(len(data), test_fraction=0.3, seed=seed)
+    if len(days) == 1:
+        return random_split(len(data), test_fraction=0.3, seed=seed)
+    order = {day: index for index, day in enumerate(days)}
+    split = temporal_split(data["day"].map(order).to_numpy(), train_until=len(days) - 2)
+    return drop_overlapping_groups(split, data["address"].to_numpy())
 
 
 def fit_and_score(
