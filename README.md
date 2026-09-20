@@ -24,12 +24,30 @@ Results are written to [reports/elliptic_baseline.md](reports/elliptic_baseline.
 Datasets are saved under `data/`, which git ignores. To keep them on another drive, set
 `TXRISK_DATA_DIR` to a folder there.
 
+## Ethereum data and labels (phase 2, in progress)
+
+```sh
+# Known-bad addresses (OFAC sanctions list, a few MB)
+uv run python -m txrisk.data.labels
+
+# A week of Ethereum, keeping only the columns and rows the models use
+uv run python -m txrisk.data.ethereum --start 2026-09-01 --days 7
+```
+
+The chain data comes from the [AWS public blockchain dataset](https://registry.opendata.aws/aws-public-blockchain/):
+public, free and MIT-0, with no AWS account needed. A full day in the bucket is about
+5.5 GB; the extractor keeps roughly 6% of it by dropping raw call data, non-approval
+events and traces that moved no ETH. Days are streamed one at a time, so disk use stays
+flat however long the range is, and each day is written only once it is complete.
+
 ## Datasets
 
 | Name | Contents | Source | Notes |
 |---|---|---|---|
 | `elliptic` | 203,769 Bitcoin transactions labelled licit, illicit or unknown | Weber et al. 2019, via the PyTorch Geometric mirror | Features are anonymised: useful for comparing methods, not for scoring live data |
 | `bitcoinheist` | ~2.9M Bitcoin addresses labelled with ransomware family | Akcora et al. 2019, UCI ML Repository | For fraud-type classification |
+| `ethereum` | Transactions, token transfers, approvals, ETH movements and new contracts, by day | AWS public blockchain dataset (MIT-0) | The data the real models will be trained on |
+| `labels` | Addresses reported as sanctioned | OFAC SDN list (US government, public domain) | Sources needing API keys or restricting redistribution are fetched per user, never shipped |
 
 This repository doesn't redistribute any dataset. The download script fetches each one from its
 source and checks it against a pinned SHA-256 checksum. Check each source's terms before use.
