@@ -1,0 +1,8 @@
+# Datasets are downloaded by scripts, never committed.
+data/
+
+.venv/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
