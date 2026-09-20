@@ -239,6 +239,7 @@ def extract_range(
     root: Path,
     skip_existing: bool = True,
     workers: int = 3,
+    attempts: int = 8,
 ) -> tuple[list[DayResult], list[tuple[str, date, str]]]:
     """Extract every (table, day) pair, and keep going when one of them fails.
 
@@ -260,7 +261,7 @@ def extract_range(
     failures: list[tuple[str, date, str]] = []
     with ThreadPoolExecutor(max_workers=workers) as pool:
         running = {
-            pool.submit(extract_day, table, day, root, filesystem): (table, day)
+            pool.submit(extract_day, table, day, root, filesystem, attempts): (table, day)
             for table, day in jobs
         }
         for future in as_completed(running):
@@ -302,6 +303,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--root", type=Path, default=RAW_DIR / "ethereum")
     parser.add_argument("--redo", action="store_true", help="re-extract days already on disk")
     parser.add_argument("--workers", type=int, default=3, help="day-tables fetched at once")
+    parser.add_argument("--attempts", type=int, default=8, help="tries per day before giving up")
     args = parser.parse_args(argv)
 
     tables = [t.strip() for t in args.tables.split(",") if t.strip()]
@@ -311,7 +313,7 @@ def main(argv: list[str] | None = None) -> None:
 
     results, failures = extract_range(
         tables, args.start, args.days, args.root,
-        skip_existing=not args.redo, workers=args.workers,
+        skip_existing=not args.redo, workers=args.workers, attempts=args.attempts,
     )
     total_mb = sum(r.bytes_written for r in results) / 1e6
     print(f"\n{len(results)} day-tables, {total_mb:,.0f} MB written to {args.root}")
