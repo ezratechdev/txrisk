@@ -14,6 +14,9 @@ lists are far too small to learn from.
 | address_poisoning | attacker | confirmed | 83932 | 60174 |
 | address_poisoning | victim | confirmed | 83932 | 58705 |
 | approval_phishing | spender | candidate | 2 | 2 |
+| known_bad_exposure | receiver | confirmed | 1 | 1 |
+| token_drain | collector | candidate | 59 | 59 |
+| token_drain | victim | candidate | 1419 | 1419 |
 
 ## Examples
 
@@ -21,6 +24,8 @@ lists are far too small to learn from.
 |---|---|---|
 | address_poisoning | 0x4eb0432a795bd1bc647e8f189aed83cba3db7edf | zero-value transfer to 0x4eb0432a795bd1bc647e8f189aed83cba3db7edf, which imitates 0x4eb0308ee54b3c2053b41b0ab9f964f35d587edf that this address really pays |
 | approval_phishing | 0x2769c37ecba9e73158e34a3e1a9ef05841b51f2f | 170 distinct wallets approved this spender (243 approvals) on the day it was deployed |
+| token_drain | 0x0060f9e57fccc0611ef44809b257919e78aa99ac | used approvals to move tokens out of 6 wallets that received nothing back (6 transfers) |
+| known_bad_exposure | 0xe7ebb56edf0cc4108060309e4cdd906448b7701d | receiver is listed: scamsniffer (phishing, scamsniffer blacklist) |
 
 ## Reading these
 

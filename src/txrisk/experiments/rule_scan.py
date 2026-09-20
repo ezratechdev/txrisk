@@ -19,7 +19,8 @@ from txrisk.data.labels import load_labels
 from txrisk.paths import PROCESSED_DIR, RAW_DIR
 from txrisk.report import markdown_table, save_report
 from txrisk.rules import empty_hits
-from txrisk.rules.approvals import find_approval_phishing
+from txrisk.rules.approvals import decode_approvals, find_approval_phishing
+from txrisk.rules.drains import approval_pairs, find_token_drains
 from txrisk.rules.exposure import find_known_bad_exposure
 from txrisk.rules.poisoning import find_address_poisoning
 
@@ -51,10 +52,17 @@ def scan_day(
     transactions = load_day(
         "transactions", day, ["from_address", "to_address", "hash"], root
     ).rename(columns={"hash": "transaction_hash"})
+    eth_transfers = load_day(
+        "eth_transfers", day, ["to_address", "value", "transaction_hash"], root
+    )
+    # What can corroborate a drain: the collector is brand new, or already reported.
+    corroborating = set(contracts["address"].dropna()) | set(known_bad)
+    approved = approval_pairs(decode_approvals(approvals))
 
     hits = [
         find_address_poisoning(transfers, day),
         find_approval_phishing(approvals, contracts, day, token_transfers=transfers),
+        find_token_drains(transfers, transactions, day, approved, eth_transfers, corroborating),
         find_known_bad_exposure(transactions, known_bad, day),
         find_known_bad_exposure(transfers, known_bad, day),
     ]

@@ -2,6 +2,7 @@ import pandas as pd
 
 from txrisk.rules import CANDIDATE, CONFIRMED, HIT_COLUMNS
 from txrisk.rules.approvals import decode_approvals, find_approval_phishing
+from txrisk.rules.drains import approval_pairs, find_token_drains
 from txrisk.rules.exposure import find_known_bad_exposure
 from txrisk.rules.poisoning import find_address_poisoning, lookalike_key
 
@@ -139,3 +140,97 @@ def test_exposure_reports_nothing_when_no_listed_address_is_active():
         transfers([(VICTIM, REAL, 1.0, "tx1")]), {"0x" + "b" * 40: "listed"}, DAY
     )
     assert hits.empty
+
+
+def drain_tables(rows, initiators):
+    """rows: (owner, recipient, value, tx); initiators: {tx: who sent the transaction}."""
+    transfers = transfers_frame(rows)
+    transactions = pd.DataFrame(
+        [{"transaction_hash": tx, "from_address": who} for tx, who in initiators.items()]
+    )
+    return transfers, transactions
+
+
+def transfers_frame(rows):
+    return pd.DataFrame(
+        rows, columns=["from_address", "to_address", "value", "transaction_hash"]
+    )
+
+
+def test_flags_an_account_that_empties_wallets_it_does_not_own():
+    collector = "0x" + "c" * 40
+    victims = [f"0x{i:040x}" for i in range(6)]
+    rows = [(v, collector, 100.0, f"tx{i}") for i, v in enumerate(victims)]
+    transfers, transactions = drain_tables(rows, {f"tx{i}": collector for i in range(6)})
+
+    approved = {(v, collector) for v in victims}
+    hits = find_token_drains(transfers, transactions, DAY, approved, corroborating={collector})
+    collectors = hits[hits["role"] == "collector"]
+    assert collectors["address"].tolist() == [collector]
+    assert "6 wallets that received nothing back" in collectors["evidence"].iat[0]
+    assert collectors["confidence"].iat[0] == CONFIRMED
+    assert set(hits[hits["role"] == "victim"]["address"]) == set(victims)
+
+
+def test_a_trade_is_not_a_drain_because_the_owner_gets_something_back():
+    router = "0x" + "e" * 40
+    traders = [f"0x{i:040x}" for i in range(6)]
+    rows = []
+    for index, trader in enumerate(traders):
+        rows.append((trader, router, 100.0, f"tx{index}"))       # token in
+        rows.append((router, trader, 99.0, f"tx{index}"))        # token back out
+    transfers, transactions = drain_tables(rows, {f"tx{i}": router for i in range(6)})
+
+    assert find_token_drains(transfers, transactions, DAY, {(t, router) for t in traders}).empty
+
+
+def test_eth_returned_in_the_same_transaction_also_counts_as_a_trade():
+    router = "0x" + "e" * 40
+    traders = [f"0x{i:040x}" for i in range(6)]
+    rows = [(t, router, 100.0, f"tx{i}") for i, t in enumerate(traders)]
+    transfers, transactions = drain_tables(rows, {f"tx{i}": router for i in range(6)})
+    eth_back = pd.DataFrame([
+        {"transaction_hash": f"tx{i}", "to_address": t, "value": 1e18}
+        for i, t in enumerate(traders)
+    ])
+
+    approved = {(t, router) for t in traders}
+    assert find_token_drains(
+        transfers, transactions, DAY, approved, eth_transfers=eth_back
+    ).empty
+
+
+def test_moving_your_own_tokens_is_never_a_drain():
+    owner = "0x" + "a" * 40
+    rows = [(owner, f"0x{i:040x}", 10.0, f"tx{i}") for i in range(6)]
+    transfers, transactions = drain_tables(rows, {f"tx{i}": owner for i in range(6)})
+    assert find_token_drains(transfers, transactions, DAY, {(owner, owner)}).empty
+
+
+def test_an_established_collector_stays_a_candidate():
+    """A payroll or subscription contract also pulls approved tokens and returns nothing."""
+    collector = "0x" + "c" * 40
+    payees = [f"0x{i:040x}" for i in range(6)]
+    rows = [(p, collector, 100.0, f"tx{i}") for i, p in enumerate(payees)]
+    transfers, transactions = drain_tables(rows, {f"tx{i}": collector for i in range(6)})
+
+    hits = find_token_drains(transfers, transactions, DAY, {(p, collector) for p in payees})
+    assert hits[hits["role"] == "collector"]["confidence"].iat[0] == CANDIDATE
+
+
+def test_a_sweep_without_an_approval_is_not_reported():
+    """Exchanges emptying their own deposit addresses look identical without this."""
+    sweeper = "0x" + "c" * 40
+    deposits = [f"0x{i:040x}" for i in range(50)]
+    rows = [(d, sweeper, 100.0, f"tx{i}") for i, d in enumerate(deposits)]
+    transfers, transactions = drain_tables(rows, {f"tx{i}": sweeper for i in range(50)})
+
+    assert find_token_drains(transfers, transactions, DAY, approved=set()).empty
+    assert not find_token_drains(
+        transfers, transactions, DAY, {(d, sweeper) for d in deposits}
+    ).empty
+
+
+def test_approval_pairs_come_from_decoded_approvals():
+    decoded = decode_approvals(approval_logs([(VICTIM, FAKE)]))
+    assert approval_pairs(decoded) == {(VICTIM, FAKE.lower())}
