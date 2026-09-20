@@ -63,7 +63,7 @@ def test_output_is_partitioned_by_day(tmp_path):
 
 def test_a_failed_table_does_not_abandon_the_rest_of_the_range(tmp_path, monkeypatch):
     """Ranges take hours; one dropped connection must not discard the days that worked."""
-    def flaky(table, day, root, filesystem=None, **kwargs):
+    def flaky(table, day, root, filesystem=None, attempts=8, **kwargs):
         if table == "approvals":
             raise OSError("network reset")
         return ethereum.DayResult(table, day, rows_read=10, rows_kept=5,
