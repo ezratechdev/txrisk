@@ -137,11 +137,18 @@ def output_path(table: str, day: date, root: Path) -> Path:
 
 
 def open_bucket() -> pafs.S3FileSystem:
-    """Anonymous, read-only access to the public bucket, with request-level retries."""
+    """Anonymous, read-only access to the public bucket, with retries and timeouts.
+
+    The timeouts matter as much as the retries. Without them, a socket that dies while the
+    machine sleeps leaves the reader blocked for ever: the extraction looks like it is
+    still running, and no retry is ever attempted. With them the read fails and is retried.
+    """
     return pafs.S3FileSystem(
         anonymous=True,
         region=REGION,
         retry_strategy=pafs.AwsStandardS3RetryStrategy(max_attempts=5),
+        connect_timeout=10.0,
+        request_timeout=120.0,
     )
 
 
