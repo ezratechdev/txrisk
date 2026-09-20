@@ -9,6 +9,10 @@ user downloads under the source's own terms. Sources are added only when their t
 automated access:
 
 * `ofac_sdn` - US Treasury sanctions list. A US government work, so public domain.
+* `scamsniffer` - phishing and wallet-drainer addresses, published daily on a seven-day
+  delay under GPL-3.0. Fetching it for your own use is straightforward; redistributing it,
+  or shipping artefacts built from it, carries that licence's obligations, which is
+  another reason the data stays out of this repository.
 * Etherscan's "Phish/Hack" tags are deliberately absent: their terms restrict scraping and
   redistribution. Chainabuse needs a per-user API key. Both can be added locally by anyone
   who accepts those terms.
@@ -21,6 +25,7 @@ from __future__ import annotations
 import argparse
 import csv
 import io
+import json
 import re
 from collections.abc import Callable
 from datetime import date
@@ -105,7 +110,41 @@ def fetch_ofac(raw_dir: Path) -> pd.DataFrame:
     return parse_ofac(text, collected_on=date.today())
 
 
-SOURCES: dict[str, Callable[[Path], pd.DataFrame]] = {"ofac_sdn": fetch_ofac}
+SCAMSNIFFER_URL = (
+    "https://raw.githubusercontent.com/scamsniffer/scam-database/main/blacklist/address.json"
+)
+
+
+def parse_scamsniffer(text: str, collected_on: date) -> pd.DataFrame:
+    """A flat JSON list of Ethereum addresses reported for phishing."""
+    addresses = json.loads(text)
+    rows = [
+        {
+            "address": normalise_address(address, "ethereum"),
+            "chain": "ethereum",
+            "fraud_type": "phishing",
+            "source": "scamsniffer",
+            "reference": "scamsniffer blacklist",
+            "collected_on": collected_on,
+        }
+        for address in addresses
+        if _ETHEREUM_ADDRESS.match(str(address))
+    ]
+    frame = pd.DataFrame(rows, columns=COLUMNS)
+    return frame.drop_duplicates(subset=["address", "chain", "source"]).reset_index(drop=True)
+
+
+def fetch_scamsniffer(raw_dir: Path) -> pd.DataFrame:
+    destination = raw_dir / "scamsniffer" / "address.json"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    fetch(SCAMSNIFFER_URL, destination)
+    return parse_scamsniffer(destination.read_text(encoding="utf-8"), collected_on=date.today())
+
+
+SOURCES: dict[str, Callable[[Path], pd.DataFrame]] = {
+    "ofac_sdn": fetch_ofac,
+    "scamsniffer": fetch_scamsniffer,
+}
 
 
 def build_labels(

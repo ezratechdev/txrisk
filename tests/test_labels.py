@@ -2,7 +2,13 @@ from datetime import date
 
 import pytest
 
-from txrisk.data.labels import COLUMNS, detect_chain, normalise_address, parse_ofac
+from txrisk.data.labels import (
+    COLUMNS,
+    detect_chain,
+    normalise_address,
+    parse_ofac,
+    parse_scamsniffer,
+)
 
 COLLECTED = date(2026, 9, 20)
 
@@ -69,3 +75,18 @@ def test_token_entries_keep_their_ethereum_address():
 def test_the_same_address_from_one_source_is_recorded_once(duplicate_rows):
     text = SDN_SAMPLE.splitlines()[0] + "\n"
     assert len(parse_ofac(text * duplicate_rows, COLLECTED)) == 2
+
+
+def test_parses_the_phishing_blacklist_and_keeps_only_addresses():
+    text = f'["{ETH_ADDRESS}", "{TOKEN_ADDRESS.lower()}", "not-an-address", ""]'
+    labels = parse_scamsniffer(text, COLLECTED)
+    assert labels["address"].tolist() == [ETH_ADDRESS.lower(), TOKEN_ADDRESS.lower()]
+    assert set(labels["fraud_type"]) == {"phishing"}
+    assert set(labels["source"]) == {"scamsniffer"}
+
+
+def test_phishing_and_sanctions_labels_share_one_schema():
+    # The two sources describe different things; the models need one table.
+    sanctions = parse_ofac(SDN_SAMPLE, COLLECTED)
+    phishing = parse_scamsniffer(f'["{ETH_ADDRESS}"]', COLLECTED)
+    assert list(sanctions.columns) == list(phishing.columns) == COLUMNS
