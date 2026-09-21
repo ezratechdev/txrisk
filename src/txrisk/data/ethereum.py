@@ -236,8 +236,7 @@ def extract_day(
 
 def extract_range(
     tables: list[str],
-    start: date,
-    days: int,
+    days: list[date],
     root: Path,
     skip_existing: bool = True,
     workers: int = 3,
@@ -250,8 +249,7 @@ def extract_range(
     command retries only what is missing.
     """
     jobs = []
-    for offset in range(days):
-        day = start + timedelta(days=offset)
+    for day in days:
         for table in tables:
             if skip_existing and output_path(table, day, root).exists():
                 print(f"  {day:%Y-%m-%d} {table:15} already extracted, skipping")
@@ -317,8 +315,13 @@ def load_day(
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Extract Ethereum data, one day at a time.")
-    parser.add_argument("--start", type=date.fromisoformat, required=True, help="YYYY-MM-DD")
-    parser.add_argument("--days", type=int, default=1)
+    parser.add_argument("--start", type=date.fromisoformat, help="YYYY-MM-DD")
+    parser.add_argument("--days", type=int, default=1, help="how many days from --start")
+    parser.add_argument(
+        "--dates", nargs="*", type=date.fromisoformat,
+        help="specific days, which need not be adjacent: the days where known-bad "
+             "addresses were active are scattered across years",
+    )
     parser.add_argument("--tables", default=",".join(TABLES), help=f"any of: {', '.join(TABLES)}")
     parser.add_argument("--root", type=Path, default=RAW_DIR / "ethereum")
     parser.add_argument("--redo", action="store_true", help="re-extract days already on disk")
@@ -330,9 +333,12 @@ def main(argv: list[str] | None = None) -> None:
     unknown = set(tables) - set(TABLES)
     if unknown:
         parser.error(f"unknown tables: {sorted(unknown)}. Choose from {sorted(TABLES)}")
+    if not args.dates and not args.start:
+        parser.error("give either --start (with --days) or --dates")
 
+    days = args.dates or [args.start + timedelta(days=n) for n in range(args.days)]
     results, failures = extract_range(
-        tables, args.start, args.days, args.root,
+        tables, sorted(set(days)), args.root,
         skip_existing=not args.redo, workers=args.workers, attempts=args.attempts,
     )
     total_mb = sum(r.bytes_written for r in results) / 1e6

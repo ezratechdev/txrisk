@@ -73,7 +73,7 @@ def test_a_failed_table_does_not_abandon_the_rest_of_the_range(tmp_path, monkeyp
     monkeypatch.setattr(ethereum, "open_bucket", lambda: None)
 
     results, failures = ethereum.extract_range(
-        ["transactions", "approvals"], DAY, days=1, root=tmp_path, workers=2
+        ["transactions", "approvals"], [DAY], root=tmp_path, workers=2
     )
     assert [r.table for r in results] == ["transactions"]
     assert [(table, day) for table, day, _ in failures] == [("approvals", DAY)]
@@ -86,7 +86,7 @@ def test_finished_days_are_not_fetched_again(tmp_path, monkeypatch):
     monkeypatch.setattr(ethereum, "open_bucket", lambda: None)
     monkeypatch.setattr(ethereum, "extract_day", lambda *a, **k: pytest.fail("refetched"))
 
-    results, failures = ethereum.extract_range(["transactions"], DAY, 1, tmp_path)
+    results, failures = ethereum.extract_range(["transactions"], [DAY], tmp_path)
     assert not results and not failures
 
 
@@ -152,3 +152,16 @@ def test_extract_day_keeps_wanted_rows_and_drops_the_rest(tmp_path, monkeypatch)
     written = pq.read_table(output_path("approvals", DAY, out))
     assert written.column("address").to_pylist() == ["token", "nft"]
     assert "unwanted" not in written.column_names
+
+
+def test_scattered_days_can_be_extracted_without_the_gap_between_them(tmp_path, monkeypatch):
+    """Days where known-bad addresses were active are years apart, not adjacent."""
+    asked = []
+    monkeypatch.setattr(ethereum, "open_bucket", lambda: None)
+    monkeypatch.setattr(ethereum, "extract_day",
+                        lambda table, day, root, filesystem=None, attempts=8, **k:
+                        (asked.append(day) or ethereum.DayResult(table, day, 1, 1, 1, 0.1)))
+
+    wanted = [date(2022, 10, 26), date(2023, 3, 20)]
+    ethereum.extract_range(["transactions"], wanted, tmp_path, workers=1)
+    assert sorted(asked) == wanted
