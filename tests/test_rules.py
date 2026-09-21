@@ -88,10 +88,20 @@ def test_a_new_contract_many_wallets_approved_is_a_candidate_until_tokens_move()
     assert "25 distinct wallets" in hits["evidence"].iat[0]
 
 
-def test_the_hit_is_confirmed_once_the_approvers_tokens_move_to_the_spender():
+def token_transfers_frame(rows):
+    """rows: (owner, spender, value, tx, token)."""
+    return pd.DataFrame(
+        rows,
+        columns=["from_address", "to_address", "value", "transaction_hash", "token_address"],
+    )
+
+
+def test_a_spender_that_empties_wallets_of_many_tokens_is_confirmed():
     drainer = "0x" + "d" * 40
     owners = [f"0x{index:040x}" for index in range(25)]
-    swept = transfers([(owners[0], drainer, 500.0, "drain1"), (owners[1], drainer, 10.0, "drain2")])
+    swept = token_transfers_frame([
+        (owners[i], drainer, 500.0, f"drain{i}", f"0x{i:040x}") for i in range(4)
+    ])
 
     hits = find_approval_phishing(
         approval_logs([(o, drainer) for o in owners]),
@@ -100,7 +110,28 @@ def test_the_hit_is_confirmed_once_the_approvers_tokens_move_to_the_spender():
         token_transfers=swept,
     )
     assert hits["confidence"].iat[0] == CONFIRMED
-    assert "tokens then moved from 2 of them" in hits["evidence"].iat[0]
+    assert "took 4 different tokens from 4 of them" in hits["evidence"].iat[0]
+
+
+def test_a_deposit_contract_taking_one_token_stays_a_candidate():
+    """Staking pulls approved tokens and returns nothing on-chain, exactly like a drain.
+
+    Two contracts this rule first called drainers took a single token from over a
+    thousand wallets and never forwarded any of it.
+    """
+    staking = "0x" + "5" * 40
+    depositors = [f"0x{index:040x}" for index in range(25)]
+    one_token = token_transfers_frame([
+        (depositors[i], staking, 500.0, f"deposit{i}", "0x" + "c" * 40) for i in range(20)
+    ])
+
+    hits = find_approval_phishing(
+        approval_logs([(d, staking) for d in depositors]),
+        pd.DataFrame({"address": [staking]}),
+        DAY,
+        token_transfers=one_token,
+    )
+    assert hits["confidence"].iat[0] == CANDIDATE
 
 
 def test_an_established_router_is_not_flagged_however_many_approvals_it_takes():

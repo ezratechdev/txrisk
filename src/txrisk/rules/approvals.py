@@ -20,6 +20,8 @@ from txrisk.rules import CANDIDATE, CONFIRMED, build_hits, empty_hits
 
 RULE = "approval_phishing"
 MIN_DISTINCT_OWNERS = 20
+MANY_TOKENS = 3
+"""Taking this many different tokens out of wallets is emptying them, not collecting a fee."""
 
 
 def address_from_topic(topic: pd.Series) -> pd.Series:
@@ -42,16 +44,21 @@ def decode_approvals(approvals: pd.DataFrame) -> pd.DataFrame:
     ]
 
 
-def count_sweeps(spender: str, owners: set[str], token_transfers: pd.DataFrame) -> int:
-    """How many of those owners then sent tokens to the spender itself."""
+def count_sweeps(
+    spender: str, owners: set[str], token_transfers: pd.DataFrame
+) -> tuple[int, int]:
+    """How many of those owners sent tokens to the spender, and in how many tokens."""
     if token_transfers.empty:
-        return 0
+        return 0, 0
     moved = token_transfers[
         (token_transfers["to_address"] == spender)
         & (token_transfers["value"] > 0)
         & (token_transfers["from_address"].isin(owners))
     ]
-    return int(moved["from_address"].nunique())
+    if moved.empty:
+        return 0, 0
+    tokens = moved["token_address"].nunique() if "token_address" in moved else 1
+    return int(moved["from_address"].nunique()), int(tokens)
 
 
 def find_approval_phishing(
@@ -90,19 +97,26 @@ def find_approval_phishing(
         return empty_hits()
 
     transfers = pd.DataFrame() if token_transfers is None else token_transfers
-    per_spender["swept"] = [
+    swept = [
         count_sweeps(spender, set(suspect.loc[suspect["spender"] == spender, "owner"]), transfers)
         for spender in per_spender["spender"]
     ]
+    per_spender["swept"] = [victims for victims, _ in swept]
+    per_spender["tokens_taken"] = [tokens for _, tokens in swept]
 
-    drained = per_spender["swept"] > 0
+    # Sweeping alone is not theft: a staking contract pulls approved tokens and returns
+    # nothing on-chain either. Two of the contracts this rule first called drainers took a
+    # single token from over a thousand wallets and never forwarded any of it, which is a
+    # deposit contract. Emptying wallets means taking whatever they happen to hold.
+    drained = (per_spender["swept"] > 0) & (per_spender["tokens_taken"] >= MANY_TOKENS)
     evidence = (
         per_spender["victims"].astype(str) + " distinct wallets approved this spender ("
         + per_spender["approvals"].astype(str) + " approvals) on the day it was deployed"
     )
     evidence = evidence.where(
-        ~drained,
-        evidence + "; tokens then moved from " + per_spender["swept"].astype(str) + " of them",
+        per_spender["swept"] == 0,
+        evidence + "; then took " + per_spender["tokens_taken"].astype(str)
+        + " different tokens from " + per_spender["swept"].astype(str) + " of them",
     )
     confidence = pd.Series(np.where(drained, CONFIRMED, CANDIDATE), index=per_spender.index)
     return build_hits(

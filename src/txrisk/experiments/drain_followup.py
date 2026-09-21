@@ -20,9 +20,11 @@ from __future__ import annotations
 
 import argparse
 
+import numpy as np
 import pandas as pd
 
 from txrisk.data.ethereum import extracted_days, load_day
+from txrisk.data.labels import load_labels
 from txrisk.paths import PROCESSED_DIR
 from txrisk.report import markdown_table, save_report
 
@@ -67,6 +69,15 @@ def collector_behaviour(collectors: set[str], days: list[str]) -> pd.DataFrame:
     return summary.reset_index()
 
 
+def reported_addresses() -> set[str]:
+    """Addresses someone else has already reported for phishing, if the labels are built."""
+    try:
+        labels = load_labels()
+    except FileNotFoundError:
+        return set()
+    return set(labels.loc[labels["fraud_type"] == "phishing", "address"])
+
+
 def classify(summary: pd.DataFrame) -> pd.Series:
     """A reading of the evidence, not a verdict: which way each collector leans."""
     empties_wallets = summary["tokens_taken"] >= MANY_TOKENS
@@ -87,16 +98,36 @@ def main(argv: list[str] | None = None) -> None:
 
     days = args.days or extracted_days()
     hits = pd.read_parquet(PROCESSED_DIR / "rule_hits.parquet")
-    collectors = set(hits.loc[(hits["rule"] == "token_drain")
-                              & (hits["role"] == "collector"), "address"])
-    print(f"following {len(collectors)} drain candidates over {len(days)} day(s)")
+    # Both rules point at the same kind of address: something that pulls other people's
+    # tokens. Neither can judge it from one day, which is what this step is for.
+    watched = hits[
+        ((hits["rule"] == "token_drain") & (hits["role"] == "collector"))
+        | ((hits["rule"] == "approval_phishing") & (hits["role"] == "spender"))
+    ]
+    collectors = set(watched["address"])
+    print(f"following {len(collectors)} candidates over {len(days)} day(s)")
 
     summary = collector_behaviour(collectors, days)
     if summary.empty:
         print("no activity found for these addresses")
         return
     summary["leaning"] = classify(summary)
+    reported = reported_addresses()
+    summary["on_blacklist"] = summary["collector"].isin(reported)
     counts = summary["leaning"].value_counts()
+
+    # What a later phase can train on: behaviour over the window, or an independent report.
+    promoted = summary[(summary["leaning"] == "drain-like") | summary["on_blacklist"]]
+    labels = pd.DataFrame({
+        "address": promoted["collector"],
+        "fraud_type": "phishing",
+        "basis": np.where(promoted["on_blacklist"], "reported", "behaviour over the window"),
+        "tokens_taken": promoted["tokens_taken"],
+        "victims": promoted["victims"],
+    })
+    labels.to_parquet(PROCESSED_DIR / "promoted_labels.parquet", index=False)
+    print(f"\n{len(labels)} addresses promoted to phishing labels "
+          f"({int(promoted['on_blacklist'].sum())} of them independently reported)")
 
     ranked = summary.nlargest(15, "victims")[
         ["collector", "victims", "tokens_taken", "days_active",
