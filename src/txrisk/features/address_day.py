@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 
 from txrisk.data.ethereum import load_day
-from txrisk.paths import RAW_DIR
+from txrisk.paths import PROCESSED_DIR, RAW_DIR
 
 # Amounts arrive as floats in the source data, so they are magnitudes, never exact wei.
 
@@ -37,6 +37,26 @@ def _side(frame: pd.DataFrame, own: str, other: str, prefix: str) -> pd.DataFram
         out[f"{prefix}_zero_value"] = grouped["value"].apply(lambda v: int((v == 0).sum()))
     out.index.name = "address"
     return out
+
+
+def features_for_day(
+    day: str, root: Path = RAW_DIR / "ethereum", cache_dir: Path | None = PROCESSED_DIR
+) -> pd.DataFrame:
+    """Build a day's features once and keep them, because rebuilding costs minutes.
+
+    Each day is written on its own so a model can read the days it needs without ever
+    holding the whole window in memory. On a machine with a gigabyte or two to spare that
+    is the difference between training and swapping.
+    """
+    if cache_dir is None:
+        return build_address_features(day, root)
+    path = cache_dir / "features" / f"date={day}" / "part.parquet"
+    if path.exists():
+        return pd.read_parquet(path)
+    features = build_address_features(day, root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    features.to_parquet(path, index=False)
+    return features
 
 
 def build_address_features(day: str, root: Path = RAW_DIR / "ethereum") -> pd.DataFrame:
@@ -101,6 +121,10 @@ def build_address_features(day: str, root: Path = RAW_DIR / "ethereum") -> pd.Da
         features.get("token_out_counterparties", 0), features.get("token_out_count", 0)
     )
     features["day"] = day
+    # Counts and shares fit in 32 bits, and halving the frame matters more than the
+    # last digit of a transfer count.
+    numeric = features.select_dtypes("number").columns
+    features[numeric] = features[numeric].astype("float32")
     return features.reset_index().rename(columns={"index": "address"})
 
 

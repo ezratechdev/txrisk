@@ -77,3 +77,25 @@ def test_every_zero_value_feature_is_excluded_by_the_circularity_test(tmp_path):
     zero_value_features = {c for c in features.columns if "zero_value" in c}
     assert zero_value_features
     assert zero_value_features <= set(RULE_SIGNALS)
+
+
+def test_features_are_built_once_and_reused(tmp_path, monkeypatch):
+    """Rebuilding a day costs minutes; on a machine with little spare memory it also
+    means holding a whole window at once."""
+    from txrisk.features import address_day
+
+    calls = []
+    monkeypatch.setattr(address_day, "build_address_features",
+                        lambda day, root=None: calls.append(day) or pd.DataFrame(
+                            {"address": [A], "tx_out_count": [1.0], "day": [day]}))
+
+    first = address_day.features_for_day(DAY, tmp_path, cache_dir=tmp_path / "cache")
+    second = address_day.features_for_day(DAY, tmp_path, cache_dir=tmp_path / "cache")
+
+    assert calls == [DAY]
+    pd.testing.assert_frame_equal(first, second)
+
+
+def test_features_are_stored_as_32_bit(tmp_path):
+    features = build(tmp_path)
+    assert all(str(features[c].dtype) == "float32" for c in features.select_dtypes("number"))

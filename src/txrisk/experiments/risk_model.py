@@ -32,7 +32,7 @@ from txrisk.evaluation.splits import (
     random_split,
     temporal_split,
 )
-from txrisk.features.address_day import build_address_features
+from txrisk.features.address_day import features_for_day
 from txrisk.paths import PROCESSED_DIR
 from txrisk.report import markdown_table, save_report
 
@@ -62,8 +62,10 @@ def load_dataset(days: list[str]) -> pd.DataFrame:
 
     frames = []
     for day in days:
-        features = build_address_features(day)
-        features["label"] = features["address"].isin(attackers_by_day.get(day, set())).astype(int)
+        features = features_for_day(day)
+        features["label"] = features["address"].isin(attackers_by_day.get(day, set())).astype(
+            "int8"
+        )
         frames.append(features)
         print(f"  {day}: {len(features):,} addresses, {int(features['label'].sum()):,} positive")
     return pd.concat(frames, ignore_index=True)
@@ -94,13 +96,19 @@ def fit_and_score(
         n_estimators=300, learning_rate=0.05, num_leaves=63, colsample_bytree=0.8,
         random_state=seed, verbose=-1,
     )
-    # Isotonic calibration on held-out folds, so a score of 0.9 means roughly nine in ten.
-    calibrated = CalibratedClassifierCV(model, method="isotonic", cv=3)
-    calibrated.fit(X[split.train], y[split.train])
-    probabilities = calibrated.predict_proba(X[split.test])[:, 1]
+    # Calibrate on a slice of training data the model never saw, rather than on
+    # cross-validation folds. It costs one extra fit instead of three copies of the data,
+    # and the held-out slice is the latest part of the training period, which is closer to
+    # the conditions the scores will meet.
+    train_rows = np.flatnonzero(split.train)
+    cut = int(len(train_rows) * 0.8)
+    fitting, calibrating = train_rows[:cut], train_rows[cut:]
 
-    plain = model.fit(X[split.train], y[split.train])
-    return probabilities, plain, evaluate(y[split.test], probabilities)
+    model.fit(X[fitting], y[fitting])
+    calibrated = CalibratedClassifierCV(model, method="isotonic", cv="prefit")
+    calibrated.fit(X[calibrating], y[calibrating])
+    probabilities = calibrated.predict_proba(X[split.test])[:, 1]
+    return probabilities, model, evaluate(y[split.test], probabilities)
 
 
 def top_features(model: LGBMClassifier, features: list[str], count: int = 8) -> pd.DataFrame:
