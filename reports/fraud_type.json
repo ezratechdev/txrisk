@@ -1,0 +1,9 @@
+{
+  "known_accuracy": 0.9860700440239175,
+  "known_macro_f1": 0.9442660166118104,
+  "known_answered": 0.9861357513634273,
+  "unseen_rejected": NaN,
+  "n_known": 15219,
+  "n_unseen": 0,
+  "n_classes_scored": 2
+}

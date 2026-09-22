@@ -78,14 +78,44 @@ def threshold_for_coverage(max_prob: np.ndarray, coverage: float) -> float:
     return float(np.quantile(np.asarray(max_prob), 1.0 - coverage))
 
 
-def predict_with_rejection(
-    proba: np.ndarray, classes: np.ndarray, threshold: float, unknown_label: str = UNKNOWN
-) -> np.ndarray:
-    """Name the most likely class, or answer `unknown_label` when no class is convincing."""
+def thresholds_per_class(
+    proba: np.ndarray, classes: np.ndarray, coverage: float
+) -> dict[str, float]:
+    """A separate confidence bar for each class, so rare types are not silenced.
+
+    One bar for everything sounds fair and is not. Calibrated on data that is 99% one
+    class, the bar sits at that class's confidence, and every member of the rare class
+    falls under it and is answered "unknown" - including the ones the model had right.
+    """
     classes = np.asarray(classes)
-    return np.where(
-        proba.max(axis=1) >= threshold, classes[proba.argmax(axis=1)], unknown_label
+    chosen = classes[proba.argmax(axis=1)]
+    best = proba.max(axis=1)
+    bars = {}
+    for name in classes:
+        scores = best[chosen == name]
+        bars[name] = float(np.quantile(scores, 1.0 - coverage)) if len(scores) else 0.0
+    return bars
+
+
+def predict_with_rejection(
+    proba: np.ndarray,
+    classes: np.ndarray,
+    threshold: float | dict[str, float],
+    unknown_label: str = UNKNOWN,
+) -> np.ndarray:
+    """Name the most likely class, or answer `unknown_label` when no class is convincing.
+
+    `threshold` is either one bar for everything, or one per class.
+    """
+    classes = np.asarray(classes)
+    chosen = classes[proba.argmax(axis=1)]
+    best = proba.max(axis=1)
+    bars = (
+        np.array([threshold.get(name, 0.0) for name in chosen])
+        if isinstance(threshold, dict)
+        else np.full(len(chosen), threshold)
     )
+    return np.where(best >= bars, chosen, unknown_label)
 
 
 def evaluate_open_set(

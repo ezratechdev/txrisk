@@ -51,3 +51,28 @@ def test_per_class_scores_keeps_rare_classes_visible():
     assert scores.loc["cerber", "f1"] == 1.0
     assert scores.loc["locky", "recall"] == 0.0
     assert scores.loc["locky", "support"] == 1
+
+
+def test_each_class_gets_its_own_confidence_bar():
+    """A single bar calibrated on an imbalanced slice silences the rare class.
+
+    Here poisoning is predicted with near-certainty and phishing with less. One global bar
+    would sit at poisoning's confidence and reject every phishing row, including correct ones.
+    """
+    from txrisk.evaluation.metrics import thresholds_per_class
+
+    classes = np.array(["phishing", "poisoning"])
+    calibration = np.array([[0.02, 0.98]] * 90 + [[0.80, 0.20]] * 10)
+
+    bars = thresholds_per_class(calibration, classes, coverage=0.9)
+    assert bars["poisoning"] > bars["phishing"]
+
+    scored = np.array([[0.80, 0.20], [0.98, 0.02]])
+    answers = predict_with_rejection(scored, classes, bars)
+    assert answers.tolist() == ["phishing", "phishing"]
+
+
+def test_a_single_bar_still_works_for_one_class_problems():
+    classes = np.array(["phishing", "poisoning"])
+    answers = predict_with_rejection(np.array([[0.9, 0.1], [0.55, 0.45]]), classes, 0.6)
+    assert answers.tolist() == ["phishing", UNKNOWN]
