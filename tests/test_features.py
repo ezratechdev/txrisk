@@ -99,3 +99,34 @@ def test_features_are_built_once_and_reused(tmp_path, monkeypatch):
 def test_features_are_stored_as_32_bit(tmp_path):
     features = build(tmp_path)
     assert all(str(features[c].dtype) == "float32" for c in features.select_dtypes("number"))
+
+
+def test_training_days_can_be_thinned_but_scored_days_never_are(tmp_path, monkeypatch):
+    """Thinning the day being scored would flatter the result; positives never go."""
+    import pandas as pd
+
+    from txrisk.experiments import risk_model
+
+    def fake_features(day, root=None, cache_dir=None):
+        return pd.DataFrame({
+            "address": [f"0x{i:040x}" for i in range(100)],
+            "tx_out_count": [1.0] * 100,
+            "day": [day] * 100,
+        })
+
+    hits = pd.DataFrame({
+        "rule": ["address_poisoning"] * 4, "day": ["train", "train", "score", "score"],
+        "address": [f"0x{i:040x}" for i in range(4)], "role": ["attacker"] * 4,
+        "confidence": ["confirmed"] * 4, "transaction_hash": ["t"] * 4, "evidence": ["e"] * 4,
+    })
+    cache = tmp_path / "rule_hits.parquet"
+    hits.to_parquet(cache, index=False)
+    monkeypatch.setattr(risk_model, "PROCESSED_DIR", tmp_path)
+    monkeypatch.setattr(risk_model, "features_for_day", fake_features)
+
+    data = risk_model.load_dataset(["train", "score"], negative_rate=0.2, scored_days=["score"])
+    per_day = data.groupby("day").size()
+
+    assert per_day["score"] == 100
+    assert per_day["train"] < 100
+    assert int(data["label"].sum()) == 4

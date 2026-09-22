@@ -54,11 +54,25 @@ in let the "honest" run score exactly like the other one.
 IDENTIFIERS = ["address", "day"]
 
 
-def load_dataset(days: list[str]) -> pd.DataFrame:
-    """Address-day behaviour, labelled by what the rules confirmed that day."""
+def load_dataset(
+    days: list[str],
+    negative_rate: float = 1.0,
+    scored_days: list[str] | None = None,
+    seed: int = 0,
+) -> pd.DataFrame:
+    """Address-day behaviour, labelled by what the rules confirmed that day.
+
+    Fifteen days of every address on Ethereum does not fit in the memory this machine has
+    spare, and most of it is the same innocent account doing the same innocent thing. Days
+    that will only be trained on can therefore keep a sample of their negatives, while days
+    that will be scored keep every row: thinning the test set would flatter the result.
+    Positives are never dropped.
+    """
     hits = pd.read_parquet(PROCESSED_DIR / "rule_hits.parquet")
     attackers = hits[(hits["role"] == "attacker") & (hits["confidence"] == "confirmed")]
     attackers_by_day = {day: set(group["address"]) for day, group in attackers.groupby("day")}
+    scored = set(scored_days or [])
+    rng = np.random.default_rng(seed)
 
     frames = []
     for day in days:
@@ -66,9 +80,27 @@ def load_dataset(days: list[str]) -> pd.DataFrame:
         features["label"] = features["address"].isin(attackers_by_day.get(day, set())).astype(
             "int8"
         )
+        kept = len(features)
+        if negative_rate < 1.0 and day not in scored:
+            negatives = features["label"] == 0
+            sampled = negatives & (rng.random(len(features)) < negative_rate)
+            features = features[~negatives | sampled]
         frames.append(features)
-        print(f"  {day}: {len(features):,} addresses, {int(features['label'].sum()):,} positive")
+        print(f"  {day}: {len(features):,} of {kept:,} addresses kept, "
+              f"{int(features['label'].sum()):,} positive")
     return pd.concat(frames, ignore_index=True)
+
+
+def split_on_days(data: pd.DataFrame, test_days: list[str]) -> Split:
+    """Train on everything outside the named days and test on them.
+
+    Used to measure decay: train on one period, score a much later one. Addresses seen in
+    training are still dropped, so the question stays "does this generalise" rather than
+    "does it remember".
+    """
+    test = data["day"].isin(test_days).to_numpy()
+    split = Split(f"train elsewhere, test on {', '.join(test_days)}", ~test, test)
+    return drop_overlapping_groups(split, data["address"].to_numpy())
 
 
 def make_split(data: pd.DataFrame, seed: int) -> Split:
@@ -149,11 +181,20 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--days", nargs="*", help="days to use (default: all extracted)")
+    parser.add_argument("--test-days", nargs="*", help="days to score, for measuring decay")
+    parser.add_argument("--name", default="risk_model", help="report name")
+    parser.add_argument(
+        "--negative-rate", type=float, default=1.0,
+        help="share of innocent addresses to keep on training days (test days keep all)",
+    )
     args = parser.parse_args(argv)
 
     days = args.days or extracted_days()
-    data = load_dataset(days)
-    split = make_split(data, args.seed)
+    scored = args.test_days or days[-1:]
+    data = load_dataset(days, args.negative_rate, scored_days=scored, seed=args.seed)
+    split = (
+        split_on_days(data, args.test_days) if args.test_days else make_split(data, args.seed)
+    )
     numeric = [c for c in data.columns if c not in IDENTIFIERS + ["label"]]
 
     runs, models, scored = [], {}, {}
@@ -218,7 +259,7 @@ instead: fan-out, how many tokens are touched, how many counterparties never rep
   has confirmed.
 - Scores are calibrated against that same noisy definition of fraud.
 """
-    print(f"\nReport written to {save_report('risk_model', report, {'runs': runs})}")
+    print(f"\nReport written to {save_report(args.name, report, {'runs': runs})}")
 
 
 if __name__ == "__main__":
