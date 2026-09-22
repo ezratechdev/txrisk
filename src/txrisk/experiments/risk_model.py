@@ -22,6 +22,7 @@ import numpy as np
 import pandas as pd
 from lightgbm import LGBMClassifier
 from sklearn.calibration import CalibratedClassifierCV
+from sklearn.frozen import FrozenEstimator
 
 from txrisk.data.ethereum import extracted_days
 from txrisk.data.labels import load_labels
@@ -136,8 +137,17 @@ def fit_and_score(
     cut = int(len(train_rows) * 0.8)
     fitting, calibrating = train_rows[:cut], train_rows[cut:]
 
+    if len(np.unique(y[fitting])) < 2 or len(np.unique(y[calibrating])) < 2:
+        raise ValueError(
+            "the training period must contain both fraud and ordinary addresses "
+            f"(fitting on {len(fitting):,} rows, calibrating on {len(calibrating):,}); "
+            "widen the window or check that the rule hits cover these days"
+        )
+
     model.fit(X[fitting], y[fitting])
-    calibrated = CalibratedClassifierCV(model, method="isotonic", cv="prefit")
+    # FrozenEstimator keeps the fitted model as it is while the calibrator learns from the
+    # held-out slice; scikit-learn dropped the old cv="prefit" spelling for this.
+    calibrated = CalibratedClassifierCV(FrozenEstimator(model), method="isotonic")
     calibrated.fit(X[calibrating], y[calibrating])
     probabilities = calibrated.predict_proba(X[split.test])[:, 1]
     return probabilities, model, evaluate(y[split.test], probabilities)
@@ -191,7 +201,11 @@ def main(argv: list[str] | None = None) -> None:
 
     days = args.days or extracted_days()
     scored = args.test_days or days[-1:]
-    data = load_dataset(days, args.negative_rate, scored_days=scored, seed=args.seed)
+    # The calibration slice is the latest training day, and it has to carry the real
+    # proportion of fraud: calibrating on thinned data would inflate every probability.
+    training_days = [d for d in sorted(days) if d not in set(scored)]
+    untouched = scored + training_days[-1:]
+    data = load_dataset(days, args.negative_rate, scored_days=untouched, seed=args.seed)
     split = (
         split_on_days(data, args.test_days) if args.test_days else make_split(data, args.seed)
     )
