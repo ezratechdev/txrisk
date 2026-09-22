@@ -150,7 +150,13 @@ def fit_and_score(
     calibrated = CalibratedClassifierCV(FrozenEstimator(model), method="isotonic")
     calibrated.fit(X[calibrating], y[calibrating])
     probabilities = calibrated.predict_proba(X[split.test])[:, 1]
-    return probabilities, model, evaluate(y[split.test], probabilities)
+    scores = evaluate(y[split.test], probabilities)
+    # PR-AUC moves with how common fraud is, and these windows differ several-fold, so
+    # comparing them without dividing by the base rate compares the windows, not the models.
+    base_rate = float(y[split.test].mean())
+    scores["base_rate"] = base_rate
+    scores["pr_auc_lift"] = scores["pr_auc"] / base_rate if base_rate else float("nan")
+    return probabilities, model, scores
 
 
 def top_features(model: LGBMClassifier, features: list[str], count: int = 8) -> pd.DataFrame:
@@ -248,9 +254,14 @@ confirmed by the rules ({data['label'].mean():.3%}).
 
 {markdown_table(pd.DataFrame(runs))}
 
-The second row is the one to trust. It cannot see whether an address sent transfers worth
-nothing, which is how the rule defines a hit, so it has to recognise the behaviour
-instead: fan-out, how many tokens are touched, how many counterparties never reply.
+The second row is the one to trust: it cannot see whether an address sent or received
+transfers worth nothing, which is how the rule defines a hit, so it has to recognise the
+behaviour instead. Where the two rows agree, the rule's own definition was adding nothing
+the rest of the behaviour did not already show.
+
+Read `pr_auc_lift` rather than `pr_auc` when comparing windows. Fraud is several times
+more common in one of these periods than the other, which moves PR-AUC on its own; lift
+divides that out, and 1.0 means no better than guessing.
 
 ## Highest-scoring addresses in the test set
 
