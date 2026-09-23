@@ -25,6 +25,7 @@ import pandas as pd
 from lightgbm import LGBMClassifier
 
 from txrisk.data.ethereum import extracted_days
+from txrisk.data.labels import load_labels
 from txrisk.evaluation.metrics import (
     UNKNOWN,
     evaluate_open_set,
@@ -35,6 +36,7 @@ from txrisk.evaluation.metrics import (
 from txrisk.evaluation.splits import drop_overlapping_groups, temporal_split
 from txrisk.experiments.risk_model import IDENTIFIERS, RULE_SIGNALS
 from txrisk.features.address_day import features_for_day
+from txrisk.features.graph import GRAPH_COLUMNS, graph_features_for_day, known_bad_before
 from txrisk.paths import PROCESSED_DIR
 from txrisk.report import markdown_table, save_report
 
@@ -67,16 +69,21 @@ def labelled_addresses(days: list[str]) -> tuple[dict[str, set[str]], dict[str, 
     return {d: poisoning.get(d, set()) for d in days}, {d: phishing.get(d, set()) for d in days}
 
 
-def load_labelled(days: list[str]) -> pd.DataFrame:
+def load_labelled(days: list[str], with_graph: bool = False) -> pd.DataFrame:
     """Only the addresses with a known type, plus the drain victims used as a test."""
     poisoning, phishing = labelled_addresses(days)
     hits = pd.read_parquet(PROCESSED_DIR / "rule_hits.parquet")
     victims = hits[(hits["rule"] == "token_drain") & (hits["role"] == "victim")]
     victims_by_day = {day: set(group["address"]) for day, group in victims.groupby("day")}
 
+    reported = set(load_labels().query("chain == 'ethereum'")["address"])
     frames = []
     for day in days:
         features = features_for_day(day)
+        if with_graph:
+            graph = graph_features_for_day(day, known_bad_before(day, hits, reported))
+            features = features.merge(graph, on="address", how="left")
+            features[GRAPH_COLUMNS] = features[GRAPH_COLUMNS].fillna(0.0)
         kind = pd.Series("", index=features.index, dtype=object)
         kind[features["address"].isin(poisoning[day])] = POISONING
         kind[features["address"].isin(phishing[day])] = PHISHING
@@ -137,10 +144,14 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--days", nargs="*", help="days to use (default: all extracted)")
     parser.add_argument("--test-days", nargs="*", help="days to score")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--with-graph", action="store_true", help="add who each address deals with"
+    )
+    parser.add_argument("--name", default="fraud_type", help="report name")
     args = parser.parse_args(argv)
 
     days = sorted(args.days or extracted_days())
-    data = load_labelled(days)
+    data = load_labelled(days, with_graph=args.with_graph)
     test_days = args.test_days or days[-1:]
 
     known = data[data["kind"].isin([POISONING, PHISHING])].reset_index(drop=True)
@@ -230,7 +241,7 @@ the dozens that exist, meeting an unfamiliar one is the ordinary case, not an ed
 """
     print(f"\n{scores}")
     print(f"{unknown_line}")
-    print(f"Report written to {save_report('fraud_type', report, scores)}")
+    print(f"Report written to {save_report(args.name, report, scores)}")
 
 
 if __name__ == "__main__":

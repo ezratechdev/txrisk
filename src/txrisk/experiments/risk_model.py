@@ -34,6 +34,7 @@ from txrisk.evaluation.splits import (
     temporal_split,
 )
 from txrisk.features.address_day import features_for_day
+from txrisk.features.graph import GRAPH_COLUMNS, graph_features_for_day, known_bad_before
 from txrisk.paths import PROCESSED_DIR
 from txrisk.report import markdown_table, save_report
 
@@ -60,6 +61,7 @@ def load_dataset(
     negative_rate: float = 1.0,
     scored_days: list[str] | None = None,
     seed: int = 0,
+    with_graph: bool = False,
 ) -> pd.DataFrame:
     """Address-day behaviour, labelled by what the rules confirmed that day.
 
@@ -74,10 +76,15 @@ def load_dataset(
     attackers_by_day = {day: set(group["address"]) for day, group in attackers.groupby("day")}
     scored = set(scored_days or [])
     rng = np.random.default_rng(seed)
+    reported = set(load_labels().query("chain == 'ethereum'")["address"])
 
     frames = []
     for day in days:
         features = features_for_day(day)
+        if with_graph:
+            graph = graph_features_for_day(day, known_bad_before(day, hits, reported))
+            features = features.merge(graph, on="address", how="left")
+            features[GRAPH_COLUMNS] = features[GRAPH_COLUMNS].fillna(0.0)
         features["label"] = features["address"].isin(attackers_by_day.get(day, set())).astype(
             "int8"
         )
@@ -200,6 +207,10 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--test-days", nargs="*", help="days to score, for measuring decay")
     parser.add_argument("--name", default="risk_model", help="report name")
     parser.add_argument(
+        "--with-graph", action="store_true",
+        help="add who each address deals with, judged only on what was known before the day",
+    )
+    parser.add_argument(
         "--negative-rate", type=float, default=1.0,
         help="share of innocent addresses to keep on training days (test days keep all)",
     )
@@ -211,7 +222,10 @@ def main(argv: list[str] | None = None) -> None:
     # proportion of fraud: calibrating on thinned data would inflate every probability.
     training_days = [d for d in sorted(days) if d not in set(scored)]
     untouched = scored + training_days[-1:]
-    data = load_dataset(days, args.negative_rate, scored_days=untouched, seed=args.seed)
+    data = load_dataset(
+        days, args.negative_rate, scored_days=untouched, seed=args.seed,
+        with_graph=args.with_graph,
+    )
     split = (
         split_on_days(data, args.test_days) if args.test_days else make_split(data, args.seed)
     )
