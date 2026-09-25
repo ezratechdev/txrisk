@@ -27,6 +27,17 @@ def recall_at_fpr(y_true: np.ndarray, scores: np.ndarray, max_fpr: float) -> flo
     return float(tpr[fpr <= max_fpr].max())
 
 
+def precision_at_k(y_true: np.ndarray, scores: np.ndarray, k: int) -> float:
+    """How right the top of the list is, which is the only part anyone reads.
+
+    Average precision describes a whole ranking; an investigator works down from the top
+    and gives up. A model can score 0.75 precision overall while its most confident calls
+    are wrong, because calibration saturates and hundreds of rows tie at 1.0.
+    """
+    order = np.argsort(-np.asarray(scores), kind="stable")[:k]
+    return float(np.asarray(y_true)[order].mean()) if len(order) else float("nan")
+
+
 def expected_calibration_error(y_true: np.ndarray, prob: np.ndarray, n_bins: int = 10) -> float:
     """Gap between predicted probability and observed positive rate, averaged over bins."""
     y_true = np.asarray(y_true, dtype=float)
@@ -49,6 +60,8 @@ def evaluate(y_true: np.ndarray, prob: np.ndarray, threshold: float = 0.5) -> di
         "pr_auc": average_precision_score(y_true, prob),
         "roc_auc": roc_auc_score(y_true, prob),
         "recall_at_1pct_fpr": recall_at_fpr(y_true, prob, 0.01),
+        "precision_at_100": precision_at_k(y_true, prob, 100),
+        "precision_at_1000": precision_at_k(y_true, prob, 1000),
         "brier": brier_score_loss(y_true, prob),
         "ece": expected_calibration_error(y_true, prob),
     }

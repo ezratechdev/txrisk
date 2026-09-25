@@ -1,9 +1,9 @@
 {
-  "known_accuracy": 0.9794336027334253,
-  "known_macro_f1": 0.9627761393925706,
-  "known_answered": 0.9794993100729351,
+  "known_accuracy": 0.8705171762929408,
+  "known_macro_f1": 0.7999020654679734,
+  "known_answered": 0.973763684409211,
   "unseen_rejected": NaN,
-  "n_known": 15219,
+  "n_known": 15894,
   "n_unseen": 0,
-  "n_classes_scored": 2
+  "n_classes_scored": 4
 }

@@ -5,6 +5,7 @@ from txrisk.evaluation.metrics import (
     evaluate,
     expected_calibration_error,
     f1_by_group,
+    precision_at_k,
     recall_at_fpr,
 )
 
@@ -46,3 +47,21 @@ def test_f1_by_group_is_nan_for_groups_without_positives():
     )
     assert f1[1] == 1.0
     assert np.isnan(f1[2])
+
+
+def test_precision_at_k_reads_only_the_top_of_the_list():
+    """An investigator works down from the top and stops; the tail is never seen."""
+    y_true = np.array([1, 1, 0, 0, 1, 1])
+    scores = np.array([0.9, 0.8, 0.7, 0.6, 0.2, 0.1])
+    assert precision_at_k(y_true, scores, k=2) == 1.0
+    assert precision_at_k(y_true, scores, k=4) == 0.5
+
+
+def test_precision_at_k_breaks_ties_the_way_the_list_is_read():
+    # Saturated scores tie; the measure must reflect the order actually shown.
+    y_true = np.array([0, 1, 1])
+    assert precision_at_k(y_true, np.array([1.0, 1.0, 1.0]), k=1) == 0.0
+
+
+def test_precision_at_k_handles_a_shorter_list_than_asked_for():
+    assert precision_at_k(np.array([1, 0]), np.array([0.9, 0.1]), k=100) == 0.5

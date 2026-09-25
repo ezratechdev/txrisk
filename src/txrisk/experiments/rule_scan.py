@@ -23,6 +23,7 @@ from txrisk.rules.approvals import decode_approvals, find_approval_phishing
 from txrisk.rules.drains import approval_pairs, find_token_drains
 from txrisk.rules.exposure import find_known_bad_exposure
 from txrisk.rules.poisoning import find_address_poisoning
+from txrisk.rules.spam_tokens import find_spam_airdrops
 
 
 def known_bad_addresses() -> dict[str, str]:
@@ -40,10 +41,14 @@ def known_bad_addresses() -> dict[str, str]:
 
 
 def scan_day(
-    day: str, known_bad: dict[str, str], root: Path = RAW_DIR / "ethereum"
+    day: str,
+    known_bad: dict[str, str],
+    root: Path = RAW_DIR / "ethereum",
+    later_days: list[str] | None = None,
 ) -> pd.DataFrame:
     transfers = load_day(
-        "token_transfers", day, ["from_address", "to_address", "value", "transaction_hash"], root
+        "token_transfers", day,
+        ["from_address", "to_address", "value", "transaction_hash", "token_address"], root
     )
     approvals = load_day(
         "approvals", day, ["address", "topics", "transaction_hash"], root
@@ -59,8 +64,16 @@ def scan_day(
     corroborating = set(contracts["address"].dropna()) | set(known_bad)
     approved = approval_pairs(decode_approvals(approvals))
 
+    # What happened next is how a spam drop is told from an airdrop people wanted.
+    later = [
+        load_day("token_transfers", d, ["from_address", "to_address", "token_address"], root)
+        for d in (later_days or [])
+    ]
+    later_transfers = pd.concat(later, ignore_index=True) if later else None
+
     hits = [
         find_address_poisoning(transfers, day),
+        find_spam_airdrops(transfers, day, later_transfers, new_addresses_of_tokens(contracts)),
         find_approval_phishing(approvals, contracts, day, token_transfers=transfers),
         find_token_drains(transfers, transactions, day, approved, eth_transfers, corroborating),
         find_known_bad_exposure(transactions, known_bad, day),
@@ -69,6 +82,11 @@ def scan_day(
     return pd.concat([h for h in hits if not h.empty], ignore_index=True) if any(
         not h.empty for h in hits
     ) else empty_hits()
+
+
+def new_addresses_of_tokens(contracts: pd.DataFrame) -> set[str]:
+    """Contracts deployed in this window; a spam token is usually one of them."""
+    return set(contracts["address"].dropna())
 
 
 def summarise(hits: pd.DataFrame) -> pd.DataFrame:
@@ -123,8 +141,8 @@ def main(argv: list[str] | None = None) -> None:
     print(f"scanning {len(days)} day(s) against {len(known_bad):,} known-bad addresses")
 
     all_hits = []
-    for day in days:
-        hits = scan_day(day, known_bad)
+    for index, day in enumerate(days):
+        hits = scan_day(day, known_bad, later_days=days[index + 1 :][:3])
         all_hits.append(hits)
         counts = hits.groupby("rule").size().to_dict() if not hits.empty else {}
         print(f"  {day}: {len(hits):,} hits {counts}")

@@ -39,15 +39,21 @@ from txrisk.features.address_day import features_for_day
 from txrisk.features.graph import GRAPH_COLUMNS, graph_features_for_day, known_bad_before
 from txrisk.paths import PROCESSED_DIR
 from txrisk.report import markdown_table, save_report
+from txrisk.serve import load_scorer
 
 POISONING = "poisoning"
 PHISHING = "phishing"
+SPAM = "spam_token_airdrop"
+OTHER = "other"
+"""Neither fraud this model knows. An answer it can give, not merely a low score."""
+
+FRAUD_TYPES = [POISONING, PHISHING, SPAM]
 TARGET_COVERAGE = 0.9
 """Answer, rather than say "unknown", for this share of validation cases."""
 
 
-def labelled_addresses(days: list[str]) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
-    """Per day: the poisoning attackers, and the addresses tied to phishing."""
+def labelled_addresses(days: list[str]) -> dict[str, dict[str, set[str]]]:
+    """Per fraud type, per day: the addresses doing it."""
     hits = pd.read_parquet(PROCESSED_DIR / "rule_hits.parquet")
     attackers = hits[
         (hits["rule"] == "address_poisoning")
@@ -66,17 +72,49 @@ def labelled_addresses(days: list[str]) -> tuple[dict[str, set[str]], dict[str, 
         | ((hits["rule"] == "known_bad_exposure") & (hits["role"] == "receiver"))
     ]
     phishing = {day: set(group["address"]) for day, group in doing_phishing.groupby("day")}
-    return {d: poisoning.get(d, set()) for d in days}, {d: phishing.get(d, set()) for d in days}
+
+    # Spam drops are only confirmed once the days after show nobody wanted the token.
+    spam_hits = hits[(hits["rule"] == "spam_token_airdrop") & (hits["confidence"] == "confirmed")]
+    spam = {day: set(group["address"]) for day, group in spam_hits.groupby("day")}
+
+    return {
+        POISONING: {d: poisoning.get(d, set()) for d in days},
+        PHISHING: {d: phishing.get(d, set()) for d in days},
+        SPAM: {d: spam.get(d, set()) for d in days},
+    }
 
 
-def load_labelled(days: list[str], with_graph: bool = False) -> pd.DataFrame:
-    """Only the addresses with a known type, plus the drain victims used as a test."""
-    poisoning, phishing = labelled_addresses(days)
+def load_labelled(
+    days: list[str],
+    with_graph: bool = False,
+    other_per_day: int = 4000,
+    seed: int = 0,
+    scorer: object | None = None,
+    risk_floor: float = 0.5,
+) -> pd.DataFrame:
+    """Addresses with a known type, plus a sample of everything else as `other`.
+
+    `other` is what makes "unknown" sayable. Left to a confidence bar alone, the model can
+    only express doubt by scoring low, and a classifier trained on two types has nothing to
+    be uncertain between: withhold one and a single class remains, so it names that one for
+    everything. Give it a third class of ordinary addresses and "neither of the frauds I
+    know" becomes an answer it can give outright.
+
+    Which addresses fill `other` decides what the scores mean. Drawn at random from the
+    chain, it is mostly accounts no one would ever ask about, and the classifier is scored
+    on a question it will never be asked. In use, the type head only ever sees addresses
+    the risk model has already flagged, so `other` is drawn from those: risky, but neither
+    of the frauds this model knows. That is the population it will meet.
+
+    Either way the sample excludes any address a rule touched that day, in any role, so
+    `other` means "not one of these frauds" rather than "fraud nobody happened to label".
+    """
+    by_type = labelled_addresses(days)
     hits = pd.read_parquet(PROCESSED_DIR / "rule_hits.parquet")
-    victims = hits[(hits["rule"] == "token_drain") & (hits["role"] == "victim")]
-    victims_by_day = {day: set(group["address"]) for day, group in victims.groupby("day")}
+    flagged_by_day = {day: set(group["address"]) for day, group in hits.groupby("day")}
 
     reported = set(load_labels().query("chain == 'ethereum'")["address"])
+    rng = np.random.default_rng(seed)
     frames = []
     for day in days:
         features = features_for_day(day)
@@ -84,17 +122,24 @@ def load_labelled(days: list[str], with_graph: bool = False) -> pd.DataFrame:
             graph = graph_features_for_day(day, known_bad_before(day, hits, reported))
             features = features.merge(graph, on="address", how="left")
             features[GRAPH_COLUMNS] = features[GRAPH_COLUMNS].fillna(0.0)
+
         kind = pd.Series("", index=features.index, dtype=object)
-        kind[features["address"].isin(poisoning[day])] = POISONING
-        kind[features["address"].isin(phishing[day])] = PHISHING
-        kind[
-            (kind == "") & features["address"].isin(victims_by_day.get(day, set()))
-        ] = "drain victim"
+        for fraud_type in FRAUD_TYPES:
+            kind[features["address"].isin(by_type[fraud_type][day])] = fraud_type
+
+        untouched = (kind == "") & ~features["address"].isin(flagged_by_day.get(day, set()))
+        if scorer is not None:
+            risky = pd.Series(scorer.score(features) >= risk_floor, index=features.index)
+            untouched &= risky
+        candidates = np.flatnonzero(untouched.to_numpy())
+        if len(candidates):
+            chosen = rng.choice(candidates, size=min(other_per_day, len(candidates)), replace=False)
+            kind.iloc[chosen] = OTHER
+
         keep = features[kind != ""].copy()
         keep["kind"] = kind[kind != ""].to_numpy()
         frames.append(keep)
-        counts = keep["kind"].value_counts().to_dict()
-        print(f"  {day}: {counts}")
+        print(f"  {day}: {keep['kind'].value_counts().to_dict()}")
     return pd.concat(frames, ignore_index=True)
 
 
@@ -108,10 +153,10 @@ def hold_out_each_type(
     type is the real question, and the one a new kind of fraud will ask.
     """
     lines = []
-    for held in sorted(set(known["kind"])):
+    for held in FRAUD_TYPES:
         train = split.train & (known["kind"] != held).to_numpy()
         probe = split.test & (known["kind"] == held).to_numpy()
-        if not train.any() or not probe.any() or known.loc[train, "kind"].nunique() < 1:
+        if not train.any() or not probe.any():
             continue
         X = known[features].to_numpy(dtype=np.float32)
         y = known["kind"].to_numpy()
@@ -120,21 +165,19 @@ def hold_out_each_type(
             n_estimators=200, learning_rate=0.05, num_leaves=31, class_weight="balanced",
             random_state=seed, verbose=-1,
         ).fit(X[train], y[train])
-        if len(model.classes_) < 2:
-            # Only one type left to learn, so every probability is 1.0 and no bar can be
-            # set from the data. Confidence cannot express doubt it was never shown.
-            lines.append(
-                f"- **{held} withheld**: only one type remained in training, so the model "
-                f"had no way to express doubt and named it for all {int(probe.sum()):,} rows."
-            )
-            continue
         bars = thresholds_per_class(model.predict_proba(X[train]), model.classes_, coverage)
         answers = predict_with_rejection(model.predict_proba(X[probe]), model.classes_, bars)
-        rejected = float((answers == UNKNOWN).mean())
-        named = pd.Series(answers[answers != UNKNOWN]).value_counts().to_dict()
+
+        # Not naming the surviving fraud is the win: either "other" or an outright
+        # abstention means the model did not misattribute one fraud to another.
+        withheld_judgement = float(np.isin(answers, [OTHER, UNKNOWN]).mean())
+        wrong_type = pd.Series(
+            answers[~np.isin(answers, [OTHER, UNKNOWN])]
+        ).value_counts().to_dict()
         lines.append(
-            f"- **{held} withheld**: {rejected:.1%} of {int(probe.sum()):,} rows answered "
-            f"\"unknown\", the rest called {named}."
+            f"- **{held} withheld**: {withheld_judgement:.1%} of {int(probe.sum()):,} rows "
+            f"answered \"{OTHER}\" or \"{UNKNOWN}\" rather than naming the fraud it did know"
+            + (f"; {wrong_type} were misattributed." if wrong_type else ".")
         )
     return "\n".join(lines) if lines else "not enough types to withhold one"
 
@@ -147,14 +190,25 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--with-graph", action="store_true", help="add who each address deals with"
     )
+    parser.add_argument(
+        "--other-from", choices=["risky", "anyone"], default="risky",
+        help="where the 'other' class comes from: addresses the risk model flagged "
+             "(what this meets in use), or any address at all",
+    )
     parser.add_argument("--name", default="fraud_type", help="report name")
     args = parser.parse_args(argv)
 
     days = sorted(args.days or extracted_days())
-    data = load_labelled(days, with_graph=args.with_graph)
+    scorer = None
+    if args.other_from == "risky":
+        try:
+            scorer = load_scorer()
+        except FileNotFoundError:
+            print("  no saved risk model; drawing 'other' from any address instead")
+    data = load_labelled(days, with_graph=args.with_graph, scorer=scorer, seed=args.seed)
     test_days = args.test_days or days[-1:]
 
-    known = data[data["kind"].isin([POISONING, PHISHING])].reset_index(drop=True)
+    known = data.reset_index(drop=True)
     split = temporal_split(known["day"].isin(test_days).to_numpy().astype(int), train_until=0)
     split = drop_overlapping_groups(split, known["address"].to_numpy())
 
@@ -187,9 +241,10 @@ def main(argv: list[str] | None = None) -> None:
         model.predict_proba(X[split.test]), model.classes_, threshold
     )
     truth = y[split.test]
-    scores = evaluate_open_set(truth, predicted, [POISONING, PHISHING])
+    present = [c for c in [*FRAUD_TYPES, OTHER] if c in set(truth)]
+    scores = evaluate_open_set(truth, predicted, present)
 
-    per_class = per_class_scores(truth, predicted, [POISONING, PHISHING])
+    per_class = per_class_scores(truth, predicted, present)
     counts = pd.Series(truth).value_counts().rename_axis("type").reset_index(name="test rows")
 
     bars = ", ".join(f"{name} {bar:.4f}" for name, bar in sorted(threshold.items()))
